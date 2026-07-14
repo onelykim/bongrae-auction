@@ -26,25 +26,28 @@ SNAPSHOT = DATA_DIR / "snapshot.json"
 _state: dict = {"listings": [], "generated_at": None, "mode": "sample"}
 
 
-def _build() -> tuple[list[dict], str]:
-    """전체 물건을 수집(온비드 live 또는 샘플) + 실거래가 시세 보강."""
+def _build(with_price: bool = True) -> tuple[list[dict], str]:
+    """전체 물건을 수집(온비드 live 또는 샘플). with_price=True면 국토부 실거래가로 시세 보강.
+    시세 보강은 시간 예산(25초)을 두어 무료 서버에서 기동이 지연되지 않게 합니다."""
     listings, mode = onbid.get_listings()  # 필터 없이 전체
     listings = [dict(x) for x in listings]
-    for x in listings:
-        rp = realprice.market_price_for(x)
-        if rp:
-            x["market_price_m2"] = rp
-            x["market_source"] = "국토부 실거래가"
-        else:
-            x.setdefault("market_source", "추정")
+    if with_price and realprice.SERVICE_KEY:
+        budget_start = time.monotonic()
+        for x in listings:
+            if time.monotonic() - budget_start > 25:
+                break
+            rp = realprice.market_price_for(x)
+            if rp:
+                x["market_price_m2"] = rp
+                x["market_source"] = "국토부 실거래가"
     return listings, mode
 
 
-def refresh() -> dict:
-    listings, mode = _build()
+def refresh(with_price: bool = True) -> dict:
+    listings, mode = _build(with_price=with_price)
     _state.update(listings=listings, generated_at=int(time.time()), mode=mode)
     _save()
-    print(f"[dataset] 갱신 완료: {len(listings)}건 (mode={mode})")
+    print(f"[dataset] 갱신 완료: {len(listings)}건 (mode={mode}, 시세보강={with_price})")
     return meta()
 
 
@@ -76,10 +79,12 @@ def load() -> bool:
 
 
 def ensure_loaded() -> None:
+    """앱 시작 시 호출. 스냅샷이 있으면 로드, 없으면 '빠른 수집'(시세보강 생략)으로
+    즉시 목록을 채워 기동을 지연시키지 않습니다. 시세는 이후 백그라운드/일일 갱신이 채웁니다."""
     if _state["listings"]:
         return
     if not load():
-        refresh()
+        refresh(with_price=False)
 
 
 def all_listings() -> list[dict]:
