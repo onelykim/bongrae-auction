@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>🔨 봉래의 경매찾기</title>
+<title>🏠 봉래의 경매찾기</title>
 <style>
   :root{
     --surface:#fcfcfb; --page:#f9f9f7; --card:#ffffff;
@@ -146,7 +146,7 @@
 </head>
 <body>
 <header>
-  <h1>🔨 봉래의 경매찾기</h1>
+  <h1>🏠 봉래의 경매찾기</h1>
   <span class="sub">지역별 경매·공매 물건 취합 · 분석</span>
   <span id="mode" class="badge sample">샘플 데이터</span>
   <span id="updated" class="updated"></span>
@@ -541,11 +541,24 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchTab(t.dataset.t
 $('#refreshBtn').onclick=async()=>{
   if(!BACKEND) return;
   const b=$('#refreshBtn'); const old=b.textContent; b.textContent='수집 중…'; b.disabled=true;
+  let before=null;
   try{
-    const r=await fetch('/api/refresh',{method:'POST'}); const j=await r.json();
-    setMode(j.mode); setUpdated(j.generated_at); await refresh();
-  }catch(e){ alert('새로고침 실패: '+e); }
-  finally{ b.textContent=old; b.disabled=false; }
+    const r=await fetch('/api/refresh',{method:'POST'});
+    if(r.ok){ const j=await r.json(); before=j.generated_at; }
+  }catch(e){ /* 무시하고 폴링으로 확인 */ }
+  // 백그라운드 수집이 끝날 때까지(최종 업데이트 시각이 바뀔 때까지) 최대 90초 폴링
+  let done=false;
+  for(let i=0;i<30 && !done;i++){
+    await new Promise(s=>setTimeout(s,3000));
+    try{
+      const m=await (await fetch('/api/meta')).json();
+      if(!m.refreshing && m.generated_at && m.generated_at!==before){
+        setMode(m.mode); setUpdated(m.generated_at); await refresh(); done=true;
+      }
+    }catch(e){ /* 계속 시도 */ }
+  }
+  if(!done){ await refresh(); }   // 타임아웃돼도 현재 데이터로 갱신
+  b.textContent=old; b.disabled=false;
 };
 $('#themeBtn').onclick=()=>{
   const d=document.documentElement.getAttribute('data-theme')==='dark';
