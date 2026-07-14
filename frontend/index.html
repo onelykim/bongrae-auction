@@ -290,7 +290,7 @@ async function boot(){
     if(h.ok){ const j=await h.json(); BACKEND=true; setMode(j.mode); setUpdated(j.generated_at); }
   }catch(e){ BACKEND=false; }
   if(!BACKEND){ setMode('sample'); ALL=SAMPLE.slice(); setUpdated(null); $('#refreshBtn').style.display='none'; }
-  buildRegionOptions();
+  await buildRegionOptions();
   await refresh();
 }
 function setUpdated(ts){
@@ -305,18 +305,22 @@ function setMode(m){
   if(m==='live'){ el.className='badge live'; el.textContent='온비드 실데이터'; }
   else { el.className='badge sample'; el.textContent='샘플 데이터'; }
 }
-function buildRegionOptions(){
-  const src = BACKEND? SAMPLE : ALL;  // 지역/카테고리 옵션은 전체 기준
-  const bySido={};
-  SAMPLE.forEach(x=>{ (bySido[x.sido]=bySido[x.sido]||new Set()).add(x.sigungu); });
-  const sido=$('#fSido');
-  Object.keys(bySido).sort().forEach(s=>sido.add(new Option(s,s)));
-  const cats=[...new Set(SAMPLE.map(x=>x.category))].sort();
+async function buildRegionOptions(){
+  let tree=null;
+  if(BACKEND){
+    try{ tree=await (await fetch('/api/regions')).json(); }catch(e){ tree=null; }
+  }
+  if(!tree || !tree.length){   // 샘플(단독 실행) 기준
+    const bySido={}; SAMPLE.forEach(x=>{ (bySido[x.sido]=bySido[x.sido]||new Set()).add(x.sigungu); });
+    tree=Object.keys(bySido).sort().map(s=>({sido:s, sigungu:[...bySido[s]].sort()}));
+  }
+  const sido=$('#fSido'); tree.forEach(t=>sido.add(new Option(t.sido,t.sido)));
+  window._tree={}; tree.forEach(t=>window._tree[t.sido]=t.sigungu);
+  const cats=["상가","근린생활시설","아파트","오피스텔","단독주택","토지","공장","기타"];
   const cat=$('#fCat'); cats.forEach(c=>cat.add(new Option(c,c)));
-  window._bySido=bySido;
   sido.onchange=()=>{
     const sgg=$('#fSgg'); sgg.length=1;
-    if(sido.value)[...window._bySido[sido.value]].sort().forEach(g=>sgg.add(new Option(g,g)));
+    (window._tree[sido.value]||[]).forEach(g=>sgg.add(new Option(g,g)));
     refresh();
   };
 }
@@ -490,7 +494,7 @@ function loadKakao(){
   if(KAKAO_LOADING) return KAKAO_LOADING;
   KAKAO_LOADING=new Promise((res,rej)=>{
     const s=document.createElement('script');
-    s.src=`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=`;
+    s.src=`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     s.onload=()=>window.kakao.maps.load(res);
     s.onerror=rej;
     document.head.appendChild(s);
@@ -511,26 +515,35 @@ async function renderMap(){
     </div>`;
     return;
   }
-  box.innerHTML='<div id="map"></div>';
-  try{ await loadKakao(); }catch(e){ box.innerHTML='<div class="map-guide">지도 로드 실패 — 키·도메인 등록을 확인하세요.</div>'; return; }
-  const pts=VIEW.filter(x=>x.lat&&x.lng);
-  const center=pts.length? new kakao.maps.LatLng(pts[0].lat,pts[0].lng): new kakao.maps.LatLng(37.5665,126.9780);
-  MAP=new kakao.maps.Map($('#map'),{center,level:9});
+  box.innerHTML='<div id="map"></div><div class="note" style="padding:6px 2px">주소 기반으로 위치를 표시합니다(동 단위 근사). 최대 60건까지 마커 표시.</div>';
+  try{ await loadKakao(); }catch(e){ box.innerHTML='<div class="map-guide">지도 로드 실패 — 카카오 JavaScript 키·사이트 도메인 등록을 확인하세요.</div>'; return; }
+  MAP=new kakao.maps.Map($('#map'),{center:new kakao.maps.LatLng(36.5,127.8),level:12});
   MARKERS.forEach(m=>m.setMap(null)); MARKERS=[];
-  const bounds=new kakao.maps.LatLngBounds();
+  const geocoder=new kakao.maps.services.Geocoder();
   const info=new kakao.maps.InfoWindow({removable:true});
-  pts.forEach(x=>{
-    const pos=new kakao.maps.LatLng(x.lat,x.lng);
+  const bounds=new kakao.maps.LatLngBounds();
+  let any=false;
+  const place=(x,la,ln)=>{
+    const pos=new kakao.maps.LatLng(la,ln);
     const mk=new kakao.maps.Marker({position:pos,map:MAP,title:x.name});
     kakao.maps.event.addListener(mk,'click',()=>{
-      info.setContent(`<div class="infowin"><b>${x.name}</b><br>
-        최저가 ${won(x.min_bid)} · 감정 ${won(x.appraisal)}<br>
-        ${x.category} · ${x.disposal} · 유찰 ${x.fail_count}회</div>`);
+      info.setContent(`<div class="infowin"><b>${x.name}</b><br>최저가 ${won(x.min_bid)} · 감정 ${won(x.appraisal)}<br>${x.category} · ${x.disposal} · 유찰 ${x.fail_count}회</div>`);
       info.open(MAP,mk); select(x.id);
     });
     MARKERS.push(mk); bounds.extend(pos);
+    if(!any){ MAP.setCenter(pos); any=true; }
+    MAP.setBounds(bounds);
+  };
+  VIEW.slice(0,60).forEach(x=>{
+    if(x.lat&&x.lng){ place(x,x.lat,x.lng); return; }
+    const addr=x.address||((x.sido||'')+' '+(x.sigungu||''));
+    if(!addr.trim()) return;
+    geocoder.addressSearch(addr,(res,status)=>{
+      if(status===kakao.maps.services.Status.OK && res[0]){
+        x.lat=+res[0].y; x.lng=+res[0].x; place(x,x.lat,x.lng);
+      }
+    });
   });
-  if(pts.length) MAP.setBounds(bounds);
 }
 
 /* ============ 이벤트 ============ */
