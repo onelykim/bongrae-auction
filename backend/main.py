@@ -97,7 +97,8 @@ def health():
 
 @app.get("/api/meta")
 def get_meta():
-    return {**dataset.meta(), "kakao": bool(KAKAO_JS_KEY), "refresh_hour": REFRESH_HOUR}
+    return {**dataset.meta(), "kakao": bool(KAKAO_JS_KEY),
+            "refresh_hour": REFRESH_HOUR, "refreshing": _refreshing["on"]}
 
 
 @app.get("/api/regions")
@@ -160,10 +161,24 @@ def item_analysis(pid: str):
     }
 
 
+_refreshing = {"on": False}
+
+
+def _bg_refresh():
+    try:
+        dataset.refresh()
+    finally:
+        _refreshing["on"] = False
+
+
 @app.post("/api/refresh")
 def refresh_now():
-    """수동 '새로고침' — 지금 즉시 최신 데이터 수집."""
-    return dataset.refresh()
+    """수동 '새로고침' — 백그라운드로 수집 시작하고 즉시 응답(무료 서버 타임아웃 방지)."""
+    import threading
+    if not _refreshing["on"]:
+        _refreshing["on"] = True
+        threading.Thread(target=_bg_refresh, daemon=True).start()
+    return {"status": "started", "refreshing": True, **dataset.meta()}
 
 
 # ------------------------------------------------------------------ 프런트
