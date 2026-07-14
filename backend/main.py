@@ -103,7 +103,7 @@ def get_meta():
 
 @app.get("/api/regions")
 def regions():
-    return onbid.region_options()
+    return onbid.region_options(dataset.all_listings())
 
 
 @app.get("/api/listings")
