@@ -1,7 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
-# 실데이터(온비드/실거래가) 연동용. 없어도 샘플/추정치로 동작합니다.
-PublicDataReader>=1.1.0
 requests>=2.31
 # 서버 내장 일일 자동 갱신 스케줄러
 APScheduler>=3.10
