@@ -1,0 +1,21 @@
+# Render.com 배포 설정 (Blueprint).
+# GitHub 저장소에 이 파일이 있으면 Render 에서 "New + > Blueprint" 로 원클릭 배포됩니다.
+services:
+  - type: web
+    name: gyeongmae-app
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      # data.go.kr 에서 발급받은 키를 Render 대시보드 Environment 에 넣으세요.
+      - key: ONBID_SERVICE_KEY
+        sync: false
+      - key: MOLIT_SERVICE_KEY
+        sync: false
+      - key: KAKAO_JS_KEY
+        sync: false
+      # 친구들과 공유할 접속 비밀번호(설정 시 사이트 잠김). 비워두면 공개.
+      - key: SITE_PASSWORD
+        sync: false
+      - key: REFRESH_HOUR
+        value: "6"
